@@ -787,3 +787,49 @@ footer {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+
+.countdown-page {
+  text-align: center;
+}
+
+.countdown-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 150px;
+  height: 150px;
+  margin: 28px auto;
+  border-radius: 50%;
+  border: 4px solid #9875ff;
+  background: rgba(152, 117, 255, 0.12);
+  color: #ffffff;
+  font-size: 76px;
+  font-weight: 800;
+  box-shadow: 0 0 35px rgba(152, 117, 255, 0.25);
+}
+
+.round-score-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  margin-right: auto;
+  font-size: 13px;
+}
+
+.round-score-details .final-points {
+  font-weight: 700;
+}
+
+@media (max-width: 480px) {
+  .countdown-number {
+    width: 120px;
+    height: 120px;
+    font-size: 60px;
+  }
+
+  .round-score-details {
+    font-size: 12px;
+  }
+}

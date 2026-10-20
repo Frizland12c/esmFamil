@@ -30,9 +30,7 @@ const DEFAULT_SETTINGS = {
 }
 
 function emptyAnswers(categories = CATEGORIES) {
-  return Object.fromEntries(
-    categories.map((category) => [category, ''])
-  )
+  return Object.fromEntries(categories.map((category) => [category, '']))
 }
 
 function normalizeSettings(settings) {
@@ -47,7 +45,6 @@ function App() {
   const [playerName, setPlayerName] = useState(
     () => localStorage.getItem('esmFamilPlayerName') || ''
   )
-
   const [page, setPage] = useState('home')
   const [roomCode, setRoomCode] = useState('')
   const [roomCodeInput, setRoomCodeInput] = useState('')
@@ -57,10 +54,10 @@ function App() {
   const [answers, setAnswers] = useState(emptyAnswers)
   const [error, setError] = useState('')
   const [connectionStatus, setConnectionStatus] = useState('')
-
   const [settingsDraft, setSettingsDraft] = useState(
     () => normalizeSettings(DEFAULT_SETTINGS)
   )
+  const [countdownNow, setCountdownNow] = useState(Date.now())
 
   const wsRef = useRef(null)
   const pendingMessagesRef = useRef([])
@@ -75,9 +72,7 @@ function App() {
 
     pendingMessagesRef.current.push(message)
 
-    if (existingSocket?.readyState === WebSocket.CONNECTING) {
-      return
-    }
+    if (existingSocket?.readyState === WebSocket.CONNECTING) return
 
     const socket = new WebSocket(
       'wss://esm-famil-nu.vercel.app/api/ws'
@@ -114,9 +109,7 @@ function App() {
           setPlayerId(message.playerId)
           setRoomData(room)
           setSettingsDraft(normalizeSettings(room.settings))
-          setAnswers(
-            emptyAnswers(room.settings?.categories || CATEGORIES)
-          )
+          setAnswers(emptyAnswers(room.settings?.categories || CATEGORIES))
           setPage('room')
           setError('')
           return
@@ -131,10 +124,14 @@ function App() {
 
           if (room.status === 'waiting') {
             setPage('room')
+          } else if (room.status === 'countdown') {
+            setPage('countdown')
           } else if (room.status === 'answering') {
             setPage('game')
           } else if (room.status === 'scoring') {
             setPage('scoring')
+          } else if (room.status === 'round_results') {
+            setPage('roundResults')
           } else if (room.status === 'finished') {
             setPage('results')
           }
@@ -191,6 +188,18 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (page !== 'countdown') return
+
+    setCountdownNow(Date.now())
+
+    const timer = setInterval(() => {
+      setCountdownNow(Date.now())
+    }, 100)
+
+    return () => clearInterval(timer)
+  }, [page, roomData?.countdownStartAt, roomData?.countdownEndsAt])
+
+  useEffect(() => {
     const round = roomData?.round
 
     if (round && playerId) {
@@ -207,7 +216,6 @@ function App() {
 
   function handleNameChange(e) {
     const name = e.target.value
-
     setPlayerName(name)
     localStorage.setItem('esmFamilPlayerName', name)
     setError('')
@@ -220,7 +228,6 @@ function App() {
     }
 
     setError('')
-
     connectAndSend({
       type: 'create_room',
       name: playerName.trim(),
@@ -239,7 +246,6 @@ function App() {
     }
 
     setError('')
-
     connectAndSend({
       type: 'join_room',
       name: playerName.trim(),
@@ -248,26 +254,21 @@ function App() {
   }
 
   function kickPlayer(id) {
-    connectAndSend({
-      type: 'kick_player',
-      playerId: id,
-    })
+    connectAndSend({ type: 'kick_player', playerId: id })
   }
 
   function toggleCategory(category) {
     setSettingsDraft((previous) => {
       const selected = previous.categories.includes(category)
 
-      const categories = selected
-        ? previous.categories.filter((item) => item !== category)
-        : CATEGORIES.filter(
-            (item) =>
-              previous.categories.includes(item) || item === category
-          )
-
       return {
         ...previous,
-        categories,
+        categories: selected
+          ? previous.categories.filter((item) => item !== category)
+          : CATEGORIES.filter(
+              (item) =>
+                previous.categories.includes(item) || item === category
+            ),
       }
     })
 
@@ -278,16 +279,14 @@ function App() {
     setSettingsDraft((previous) => {
       const selected = previous.letters.includes(letter)
 
-      const letters = selected
-        ? previous.letters.filter((item) => item !== letter)
-        : LETTERS.filter(
-            (item) =>
-              previous.letters.includes(item) || item === letter
-          )
-
       return {
         ...previous,
-        letters,
+        letters: selected
+          ? previous.letters.filter((item) => item !== letter)
+          : LETTERS.filter(
+              (item) =>
+                previous.letters.includes(item) || item === letter
+            ),
       }
     })
 
@@ -299,7 +298,6 @@ function App() {
       ...previous,
       totalRounds: Number(value),
     }))
-
     setError('')
   }
 
@@ -317,18 +315,17 @@ function App() {
       return
     }
 
-    if (settingsDraft.categories.length === 0) {
+    if (!settingsDraft.categories.length) {
       setError('حداقل یک دسته را انتخاب کن.')
       return
     }
 
-    if (settingsDraft.letters.length === 0) {
+    if (!settingsDraft.letters.length) {
       setError('حداقل یک حرف را انتخاب کن.')
       return
     }
 
     setError('')
-
     connectAndSend({
       type: 'save_settings',
       settings: settingsDraft,
@@ -342,10 +339,7 @@ function App() {
     }
 
     setError('')
-
-    connectAndSend({
-      type: 'start_game',
-    })
+    connectAndSend({ type: 'start_game' })
   }
 
   function copyRoomCode() {
@@ -358,9 +352,7 @@ function App() {
 
   function backToHome() {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({ type: 'leave_room' })
-      )
+      wsRef.current.send(JSON.stringify({ type: 'leave_room' }))
     }
 
     setPage('home')
@@ -373,11 +365,7 @@ function App() {
   }
 
   function handleAnswerChange(category, value) {
-    const updatedAnswers = {
-      ...answers,
-      [category]: value,
-    }
-
+    const updatedAnswers = { ...answers, [category]: value }
     setAnswers(updatedAnswers)
 
     connectAndSend({
@@ -390,7 +378,6 @@ function App() {
     if (!roomData?.round || roomData.round.locked) return
 
     setError('')
-
     connectAndSend({
       type: 'stop_round',
       answers,
@@ -407,29 +394,38 @@ function App() {
 
   function nextCategory() {
     setError('')
+    connectAndSend({ type: 'next_category' })
+  }
 
-    connectAndSend({
-      type: 'next_category',
-    })
+  function nextRound() {
+    setError('')
+    connectAndSend({ type: 'next_round' })
   }
 
   const round = roomData?.round
-  const currentCategory =
-    round?.categories?.[round.categoryIndex]
-
-  const currentScores =
-    round?.scores?.[round.categoryIndex] || {}
+  const currentCategory = round?.categories?.[round.categoryIndex]
+  const currentScores = round?.scores?.[round.categoryIndex] || {}
+  const roomSettings = normalizeSettings(roomData?.settings)
 
   const allPlayersScored =
     players.length > 0 &&
     players.every((player) =>
-      Object.prototype.hasOwnProperty.call(
-        currentScores,
-        player.id
-      )
+      Object.prototype.hasOwnProperty.call(currentScores, player.id)
     )
 
-  const roomSettings = normalizeSettings(roomData?.settings)
+  let countdownNumber = 3
+
+  if (roomData?.countdownStartAt && roomData?.countdownEndsAt) {
+    if (countdownNow >= roomData.countdownStartAt) {
+      countdownNumber = Math.max(
+        1,
+        Math.min(
+          3,
+          Math.ceil((roomData.countdownEndsAt - countdownNow) / 1000)
+        )
+      )
+    }
+  }
 
   return (
     <div className="app">
@@ -441,10 +437,7 @@ function App() {
       {page === 'home' && (
         <main className="menu-card">
           <div className="player-section">
-            <label htmlFor="playerName">
-              اسم خودت رو وارد کن
-            </label>
-
+            <label htmlFor="playerName">اسم خودت رو وارد کن</label>
             <input
               id="playerName"
               type="text"
@@ -455,10 +448,7 @@ function App() {
               autoComplete="nickname"
             />
 
-            <label htmlFor="roomCodeInput">
-              کد اتاق دوستانت (۴ رقم)
-            </label>
-
+            <label htmlFor="roomCodeInput">کد اتاق دوستانت (۴ رقم)</label>
             <input
               id="roomCodeInput"
               type="text"
@@ -473,24 +463,15 @@ function App() {
               maxLength={4}
             />
 
-            {error && (
-              <p className="error-message" role="alert">
-                {error}
-              </p>
-            )}
-
+            {error && <p className="error-message" role="alert">{error}</p>}
             {connectionStatus && (
               <p className="room-note">{connectionStatus}</p>
             )}
           </div>
 
           <div className="game-icon">🎮</div>
-
           <h2>Let's Play!</h2>
-
-          <p className="description">
-            Create a room or join your friends
-          </p>
+          <p className="description">Create a room or join your friends</p>
 
           <button
             className="menu-button create-button"
@@ -508,9 +489,7 @@ function App() {
           <button
             className="menu-button join-button"
             onClick={joinRoom}
-            disabled={
-              !playerName.trim() || roomCodeInput.length !== 4
-            }
+            disabled={!playerName.trim() || roomCodeInput.length !== 4}
           >
             <span className="button-icon">↗</span>
             <span>
@@ -541,9 +520,7 @@ function App() {
             <h3>⚙️ تنظیمات بازی</h3>
 
             <div className="settings-section">
-              <label htmlFor="totalRounds">
-                تعداد دورهای بازی
-              </label>
+              <label htmlFor="totalRounds">تعداد دورهای بازی</label>
 
               {isHost ? (
                 <select
@@ -608,7 +585,10 @@ function App() {
                     : roomSettings.letters.includes(letter)
 
                   return (
-                    <label className="setting-option letter-option" key={letter}>
+                    <label
+                      className="setting-option letter-option"
+                      key={letter}
+                    >
                       <input
                         type="checkbox"
                         checked={checked}
@@ -629,7 +609,6 @@ function App() {
                     ? 'تنظیمات ذخیره شده‌اند.'
                     : 'تغییرات ذخیره نشده‌اند.'}
                 </p>
-
                 <button
                   className="start-button"
                   onClick={saveSettings}
@@ -663,12 +642,9 @@ function App() {
                       <div className="player-avatar">
                         {player.name.charAt(0).toUpperCase()}
                       </div>
-
                       <div className="player-info">
                         <strong>{player.name}</strong>
-                        <small>
-                          {player.isHost ? 'Host' : 'Player'}
-                        </small>
+                        <small>{player.isHost ? 'Host' : 'Player'}</small>
                       </div>
 
                       {player.isHost ? (
@@ -694,13 +670,8 @@ function App() {
             })}
           </div>
 
-          <p className="room-note">
-            Share the room code with your friends.
-          </p>
-
-          {error && (
-            <p className="error-message" role="alert">{error}</p>
-          )}
+          <p className="room-note">Share the room code with your friends.</p>
+          {error && <p className="error-message" role="alert">{error}</p>}
 
           {isHost && (
             <button
@@ -718,12 +689,34 @@ function App() {
         </main>
       )}
 
+      {page === 'countdown' && round && (
+        <main className="room-card countdown-page" dir="rtl">
+          <div className="room-top">
+            <h2>آماده‌ای؟</h2>
+            <p>
+              دور {round.roundNumber} از {round.totalRounds}
+            </p>
+          </div>
+
+          <div className="countdown-number" aria-live="polite">
+            {countdownNumber}
+          </div>
+
+          <p className="description">بازی تا لحظاتی دیگر شروع می‌شود...</p>
+
+          <div className="room-code-box letter-box">
+            <span>حرف این دور</span>
+            <strong className="game-letter">{round.letter}</strong>
+          </div>
+        </main>
+      )}
+
       {page === 'game' && round && (
         <main className="room-card game-page" dir="rtl">
           <div className="room-top">
             <h2>وقت اسم فامیل!</h2>
             <p>
-              دور {round.roundNumber || 1} از {round.totalRounds || roomSettings.totalRounds}
+              دور {round.roundNumber} از {round.totalRounds}
               {' — '}
               جواب‌ها رو وارد کن؛ اولین استوپ همه جواب‌ها رو قفل می‌کنه.
             </p>
@@ -738,10 +731,7 @@ function App() {
           <div className="answer-list">
             {round.categories.map((category) => (
               <div className="answer-row" key={category}>
-                <label htmlFor={`answer-${category}`}>
-                  {category}
-                </label>
-
+                <label htmlFor={`answer-${category}`}>{category}</label>
                 <input
                   id={`answer-${category}`}
                   type="text"
@@ -756,6 +746,22 @@ function App() {
               </div>
             ))}
           </div>
+
+          {error && <p className="error-message" role="alert">{error}</p>}
+
+          <button
+            className="start-button stop-button"
+            onClick={stopGame}
+            disabled={round.locked}
+          >
+            {round.locked ? 'پاسخ‌ها قفل شدند' : '🛑 استوپ!'}
+          </button>
+
+          <p className="room-note">
+            {round.locked
+              ? 'همه پاسخ‌ها قفل شده‌اند.'
+              : 'با زدن استوپ، پاسخ همه بازیکن‌ها قفل می‌شود.'}
+          </p>
 
           <div className="players-heading">
             <h3>بازیکن‌ها</h3>
@@ -781,24 +787,6 @@ function App() {
               </div>
             ))}
           </div>
-
-          {error && (
-            <p className="error-message" role="alert">{error}</p>
-          )}
-
-          <button
-            className="start-button stop-button"
-            onClick={stopGame}
-            disabled={round.locked}
-          >
-            {round.locked ? 'پاسخ‌ها قفل شدند' : '🛑 استوپ!'}
-          </button>
-
-          <p className="room-note">
-            {round.locked
-              ? 'همه پاسخ‌ها قفل شده‌اند؛ در حال ورود به امتیازدهی.'
-              : 'با زدن استوپ، پاسخ همه بازیکن‌ها قفل می‌شود.'}
-          </p>
         </main>
       )}
 
@@ -817,7 +805,7 @@ function App() {
             <span>حرف این دور</span>
             <strong className="game-letter">{round.letter}</strong>
             <span>
-              دور {round.roundNumber || 1} از {round.totalRounds || roomSettings.totalRounds}
+              دور {round.roundNumber} از {round.totalRounds}
             </span>
             <span>
               دسته {round.categoryIndex + 1} از {round.categories.length}
@@ -832,12 +820,10 @@ function App() {
             {players.map((player) => {
               const answer =
                 round.answers?.[player.id]?.[currentCategory] || ''
-
               const hasScore = Object.prototype.hasOwnProperty.call(
                 currentScores,
                 player.id
               )
-
               const selectedScore = currentScores[player.id]
 
               return (
@@ -883,9 +869,7 @@ function App() {
             })}
           </div>
 
-          {error && (
-            <p className="error-message" role="alert">{error}</p>
-          )}
+          {error && <p className="error-message" role="alert">{error}</p>}
 
           {isHost && (
             <button
@@ -894,9 +878,7 @@ function App() {
               disabled={!allPlayersScored}
             >
               {round.categoryIndex === round.categories.length - 1
-                ? (round.roundNumber >= round.totalRounds
-                    ? 'مشاهده نتیجه نهایی'
-                    : 'پایان دور و شروع دور بعد')
+                ? 'مشاهده امتیازهای این دور'
                 : 'دسته بعدی'}
               <span> ←</span>
             </button>
@@ -905,6 +887,58 @@ function App() {
           {!isHost && (
             <p className="room-note">
               بعد از امتیازدهی همه بازیکن‌ها، میزبان ادامه می‌دهد.
+            </p>
+          )}
+        </main>
+      )}
+
+      {page === 'roundResults' && round && roomData && (
+        <main className="room-card results-page" dir="rtl">
+          <div className="game-icon">🏅</div>
+          <h2>نتیجه دور {round.roundNumber}</h2>
+          <p className="description">
+            امتیاز این دور و مجموع امتیازهای بازی
+          </p>
+
+          <div className="final-score-list">
+            {[...players]
+              .sort(
+                (a, b) =>
+                  (roomData.totalScores?.[b.id] || 0) -
+                  (roomData.totalScores?.[a.id] || 0)
+              )
+              .map((player, index) => (
+                <div className="final-score-row" key={player.id}>
+                  <span className="final-rank">
+                    {index === 0 ? '🏆' : index + 1}
+                  </span>
+
+                  <strong>{player.name}</strong>
+
+                  <div className="round-score-details">
+                    <span>
+                      این دور: {round.roundScores?.[player.id] || 0}
+                    </span>
+                    <span className="final-points">
+                      مجموع: {roomData.totalScores?.[player.id] || 0}
+                    </span>
+                  </div>
+                </div>
+              ))}
+          </div>
+
+          {error && <p className="error-message" role="alert">{error}</p>}
+
+          {isHost ? (
+            <button className="start-button" onClick={nextRound}>
+              {round.roundNumber >= round.totalRounds
+                ? 'نمایش نتیجه نهایی'
+                : 'تأیید و شروع دور بعد'}
+              <span> →</span>
+            </button>
+          ) : (
+            <p className="room-note">
+              منتظر تأیید میزبان برای ادامه بازی بمان.
             </p>
           )}
         </main>
@@ -938,10 +972,7 @@ function App() {
               ))}
           </div>
 
-          <p className="room-note">
-            کد اتاق: {roomCode}
-          </p>
-
+          <p className="room-note">کد اتاق: {roomCode}</p>
           <button className="back-button" onClick={backToHome}>
             بازگشت به صفحه اصلی
           </button>

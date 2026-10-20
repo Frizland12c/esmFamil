@@ -7,25 +7,18 @@ import { randomUUID } from 'node:crypto'
 
 const app = express()
 const server = createServer(app)
-
 const wss = new WebSocketServer({ noServer: true })
 const redis = Redis.fromEnv()
 
 const PREFIX = 'esmFamil:'
 const ROOM_TTL = 60 * 60
 const MAX_PLAYERS = 15
+const COUNTDOWN_LEAD_MS = 1500
+const COUNTDOWN_DURATION_MS = 3000
 
 const CATEGORIES = [
-  'اسم',
-  'فامیل',
-  'شهر',
-  'کشور',
-  'غذا',
-  'رنگ',
-  'حیوان',
-  'ماشین',
-  'فیلم یا سریال',
-  'اشیاء',
+  'اسم', 'فامیل', 'شهر', 'کشور', 'غذا',
+  'رنگ', 'حیوان', 'ماشین', 'فیلم یا سریال', 'اشیاء',
 ]
 
 const LETTERS = [
@@ -47,9 +40,7 @@ app.get('/api/ws', (req, res) => {
 })
 
 server.on('upgrade', (request, socket, head) => {
-  const path = request.url?.split('?')[0]
-
-  if (path !== '/api/ws') {
+  if (request.url?.split('?')[0] !== '/api/ws') {
     socket.destroy()
     return
   }
@@ -73,17 +64,13 @@ async function getRoom(code) {
   if (!code) return null
 
   const data = await redis.get(roomKey(code))
-
   if (!data) return null
 
   return typeof data === 'string' ? JSON.parse(data) : data
 }
 
 async function saveRoom(room) {
-  room.updatedAt = Math.max(
-    Date.now(),
-    (room.updatedAt || 0) + 1
-  )
+  room.updatedAt = Math.max(Date.now(), (room.updatedAt || 0) + 1)
 
   await redis.set(
     roomKey(room.code),
@@ -93,28 +80,21 @@ async function saveRoom(room) {
 }
 
 function sendRoomState(ws, room) {
-  send(ws, {
-    type: 'room_state',
-    room,
-  })
-
+  send(ws, { type: 'room_state', room })
   ws.lastSentVersion = room.updatedAt
 }
 
 function sendError(ws, message) {
-  send(ws, {
-    type: 'error',
-    message,
-  })
+  send(ws, { type: 'error', message })
 }
 
 function getRoomSettings(room) {
   const saved = room.settings || DEFAULT_SETTINGS
 
   return {
-    totalRounds: saved.totalRounds,
-    categories: [...saved.categories],
-    letters: [...saved.letters],
+    totalRounds: saved.totalRounds ?? DEFAULT_SETTINGS.totalRounds,
+    categories: [...(saved.categories || DEFAULT_SETTINGS.categories)],
+    letters: [...(saved.letters || DEFAULT_SETTINGS.letters)],
   }
 }
 
@@ -123,71 +103,79 @@ function cleanAnswers(rawAnswers, categories = CATEGORIES) {
 
   for (const category of categories) {
     const value = rawAnswers?.[category]
-
     answers[category] =
-      typeof value === 'string'
-        ? value.trim().slice(0, 100)
-        : ''
+      typeof value === 'string' ? value.trim().slice(0, 100) : ''
   }
 
   return answers
 }
 
 function isPlayer(room, playerId) {
-  return room.players.some(
-    (player) => player.id === playerId
-  )
+  return room.players.some((player) => player.id === playerId)
+}
+
+function randomItem(items) {
+  return items[Math.floor(Math.random() * items.length)]
+}
+
+function prepareRound(room, roundNumber) {
+  const settings = getRoomSettings(room)
+  const answers = {}
+
+  for (const player of room.players) {
+    answers[player.id] = cleanAnswers({}, settings.categories)
+  }
+
+  const now = Date.now()
+
+  room.round = {
+    roundNumber,
+    totalRounds: settings.totalRounds,
+    letter: randomItem(settings.letters),
+    categoryIndex: 0,
+    categories: [...settings.categories],
+    answers,
+    stoppedBy: null,
+    locked: false,
+    scores: {},
+    roundScores: {},
+  }
+
+  // Everyone uses the same server timestamps.
+  room.status = 'countdown'
+  room.countdownStartAt = now + COUNTDOWN_LEAD_MS
+  room.countdownEndsAt =
+    room.countdownStartAt + COUNTDOWN_DURATION_MS
 }
 
 async function createRoom(ws, name) {
   for (let attempt = 0; attempt < 30; attempt++) {
-    const code = String(
-      Math.floor(1000 + Math.random() * 9000)
-    )
-
+    const code = String(Math.floor(1000 + Math.random() * 9000))
     const playerId = randomUUID()
 
     const room = {
       code,
       hostId: playerId,
       status: 'waiting',
-
       settings: {
         totalRounds: DEFAULT_SETTINGS.totalRounds,
         categories: [...DEFAULT_SETTINGS.categories],
         letters: [...DEFAULT_SETTINGS.letters],
       },
-
-      players: [
-        {
-          id: playerId,
-          name,
-          isHost: true,
-        },
-      ],
-
+      players: [{ id: playerId, name, isHost: true }],
       updatedAt: Date.now(),
     }
 
     const result = await redis.set(
       roomKey(code),
       JSON.stringify(room),
-      {
-        ex: ROOM_TTL,
-        nx: true,
-      }
+      { ex: ROOM_TTL, nx: true }
     )
 
     if (result === 'OK') {
       ws.roomCode = code
       ws.playerId = playerId
-
-      send(ws, {
-        type: 'room_created',
-        room,
-        playerId,
-      })
-
+      send(ws, { type: 'room_created', room, playerId })
       ws.lastSentVersion = room.updatedAt
       return
     }
@@ -220,24 +208,14 @@ async function joinRoom(ws, code, name) {
   }
 
   const playerId = randomUUID()
-
-  room.players.push({
-    id: playerId,
-    name,
-    isHost: false,
-  })
+  room.players.push({ id: playerId, name, isHost: false })
 
   await saveRoom(room)
 
   ws.roomCode = code
   ws.playerId = playerId
 
-  send(ws, {
-    type: 'joined_room',
-    room,
-    playerId,
-  })
-
+  send(ws, { type: 'joined_room', room, playerId })
   ws.lastSentVersion = room.updatedAt
 }
 
@@ -256,9 +234,7 @@ async function kickPlayer(ws, playerId) {
 
   if (playerId === room.hostId) return
 
-  room.players = room.players.filter(
-    (player) => player.id !== playerId
-  )
+  room.players = room.players.filter((player) => player.id !== playerId)
 
   await saveRoom(room)
   sendRoomState(ws, room)
@@ -278,26 +254,18 @@ async function saveSettings(ws, rawSettings) {
   }
 
   const totalRounds = rawSettings?.totalRounds
-
   const categories = Array.isArray(rawSettings?.categories)
     ? [...new Set(rawSettings.categories)]
     : []
-
   const letters = Array.isArray(rawSettings?.letters)
     ? [...new Set(rawSettings.letters)]
     : []
 
   const validRounds =
-    Number.isInteger(totalRounds) &&
-    totalRounds >= 1 &&
-    totalRounds <= 10
-
+    Number.isInteger(totalRounds) && totalRounds >= 1 && totalRounds <= 10
   const validCategories =
     categories.length > 0 &&
-    categories.every((category) =>
-      CATEGORIES.includes(category)
-    )
-
+    categories.every((category) => CATEGORIES.includes(category))
   const validLetters =
     letters.length > 0 &&
     letters.every((letter) => LETTERS.includes(letter))
@@ -307,11 +275,7 @@ async function saveSettings(ws, rawSettings) {
     return
   }
 
-  room.settings = {
-    totalRounds,
-    categories,
-    letters,
-  }
+  room.settings = { totalRounds, categories, letters }
 
   await saveRoom(room)
   sendRoomState(ws, room)
@@ -337,54 +301,26 @@ async function startGame(ws) {
 
   const settings = getRoomSettings(room)
 
-  if (
-    !Number.isInteger(settings.totalRounds) ||
-    settings.totalRounds < 1 ||
-    settings.totalRounds > 10 ||
-    !settings.categories.length ||
-    !settings.letters.length ||
-    !settings.categories.every((category) =>
-      CATEGORIES.includes(category)
-    ) ||
-    !settings.letters.every((letter) =>
-      LETTERS.includes(letter)
-    )
-  ) {
+  const validSettings =
+    Number.isInteger(settings.totalRounds) &&
+    settings.totalRounds >= 1 &&
+    settings.totalRounds <= 10 &&
+    settings.categories.length > 0 &&
+    settings.letters.length > 0 &&
+    settings.categories.every((category) => CATEGORIES.includes(category)) &&
+    settings.letters.every((letter) => LETTERS.includes(letter))
+
+  if (!validSettings) {
     sendError(ws, 'تنظیمات بازی معتبر نیست.')
     return
   }
 
-  const totalScores = {}
-  const answers = {}
-
-  for (const player of room.players) {
-    totalScores[player.id] = 0
-
-    answers[player.id] = cleanAnswers(
-      {},
-      settings.categories
-    )
-  }
-
-  const letter = settings.letters[
-    Math.floor(Math.random() * settings.letters.length)
-  ]
-
   room.settings = settings
-  room.status = 'answering'
-  room.totalScores = totalScores
+  room.totalScores = Object.fromEntries(
+    room.players.map((player) => [player.id, 0])
+  )
 
-  room.round = {
-    roundNumber: 1,
-    totalRounds: settings.totalRounds,
-    letter,
-    categoryIndex: 0,
-    categories: [...settings.categories],
-    answers,
-    stoppedBy: null,
-    locked: false,
-    scores: {},
-  }
+  prepareRound(room, 1)
 
   await saveRoom(room)
   sendRoomState(ws, room)
@@ -399,10 +335,7 @@ async function saveAnswers(ws, rawAnswers) {
   }
 
   if (room.status !== 'answering' || room.round?.locked) {
-    sendError(
-      ws,
-      'زمان پاسخ‌گویی تمام شده و جواب‌ها قفل شده‌اند.'
-    )
+    sendError(ws, 'زمان پاسخ‌گویی تمام شده و جواب‌ها قفل شده‌اند.')
     return
   }
 
@@ -423,9 +356,7 @@ async function stopRound(ws, rawAnswers) {
     return
   }
 
-  if (room.status !== 'answering' || room.round?.locked) {
-    return
-  }
+  if (room.status !== 'answering' || room.round?.locked) return
 
   if (rawAnswers && typeof rawAnswers === 'object') {
     room.round.answers[ws.playerId] = cleanAnswers(
@@ -481,7 +412,7 @@ async function nextCategory(ws) {
   const room = await getRoom(ws.roomCode)
 
   if (!room || room.hostId !== ws.playerId) {
-    sendError(ws, 'فقط میزبان می‌تواند به دسته بعدی برود.')
+    sendError(ws, 'فقط میزبان می‌تواند ادامه دهد.')
     return
   }
 
@@ -495,10 +426,7 @@ async function nextCategory(ws) {
   const categoryScores = room.round.scores[categoryIndex] || {}
 
   const everyoneScored = room.players.every((player) =>
-    Object.prototype.hasOwnProperty.call(
-      categoryScores,
-      player.id
-    )
+    Object.prototype.hasOwnProperty.call(categoryScores, player.id)
   )
 
   if (!everyoneScored) {
@@ -506,68 +434,59 @@ async function nextCategory(ws) {
     return
   }
 
-  const isLastCategory =
-    categoryIndex === categories.length - 1
-
-  if (!isLastCategory) {
+  if (categoryIndex < categories.length - 1) {
     room.round.categoryIndex += 1
-
     await saveRoom(room)
     sendRoomState(ws, room)
     return
   }
 
-  // Add this round's scores to the cumulative totals.
+  // Calculate and store this round's score exactly once.
+  const roundScores = {}
+
   for (const player of room.players) {
-    let roundScore = 0
+    let scoreForRound = 0
 
     for (let index = 0; index < categories.length; index++) {
-      roundScore +=
-        room.round.scores[index]?.[player.id] ?? 0
+      scoreForRound += room.round.scores[index]?.[player.id] ?? 0
     }
 
+    roundScores[player.id] = scoreForRound
     room.totalScores[player.id] =
-      (room.totalScores[player.id] || 0) + roundScore
+      (room.totalScores[player.id] || 0) + scoreForRound
+  }
+
+  room.round.roundScores = roundScores
+  room.status = 'round_results'
+
+  await saveRoom(room)
+  sendRoomState(ws, room)
+}
+
+async function nextRound(ws) {
+  const room = await getRoom(ws.roomCode)
+
+  if (!room || room.hostId !== ws.playerId) {
+    sendError(ws, 'فقط میزبان می‌تواند دور بعدی را شروع کند.')
+    return
+  }
+
+  if (room.status !== 'round_results' || !room.round) {
+    sendError(ws, 'ابتدا باید نتایج دور را بررسی کنید.')
+    return
   }
 
   const settings = getRoomSettings(room)
-  const currentRound = room.round.roundNumber
 
-  if (currentRound >= settings.totalRounds) {
+  // Final round: move to the final ranking page.
+  if (room.round.roundNumber >= settings.totalRounds) {
     room.status = 'finished'
-
     await saveRoom(room)
     sendRoomState(ws, room)
     return
   }
 
-  // Start the next round with a new allowed letter.
-  const letter = settings.letters[
-    Math.floor(Math.random() * settings.letters.length)
-  ]
-
-  const answers = {}
-
-  for (const player of room.players) {
-    answers[player.id] = cleanAnswers(
-      {},
-      settings.categories
-    )
-  }
-
-  room.round = {
-    roundNumber: currentRound + 1,
-    totalRounds: settings.totalRounds,
-    letter,
-    categoryIndex: 0,
-    categories: [...settings.categories],
-    answers,
-    stoppedBy: null,
-    locked: false,
-    scores: {},
-  }
-
-  room.status = 'answering'
+  prepareRound(room, room.round.roundNumber + 1)
 
   await saveRoom(room)
   sendRoomState(ws, room)
@@ -577,12 +496,9 @@ async function leaveRoom(ws) {
   if (!ws.roomCode || !ws.playerId) return
 
   const room = await getRoom(ws.roomCode)
-
   if (!room) return
 
-  room.players = room.players.filter(
-    (player) => player.id !== ws.playerId
-  )
+  room.players = room.players.filter((player) => player.id !== ws.playerId)
 
   if (room.players.length === 0) {
     await redis.del(roomKey(room.code))
@@ -591,7 +507,6 @@ async function leaveRoom(ws) {
 
   if (room.hostId === ws.playerId) {
     room.hostId = room.players[0].id
-
     room.players = room.players.map((player) => ({
       ...player,
       isHost: player.id === room.hostId,
@@ -616,10 +531,7 @@ wss.on('connection', (ws) => {
         const name = String(message.name || '').trim()
 
         if (!name || name.length > 20) {
-          sendError(
-            ws,
-            'نام بازیکن باید بین ۱ تا ۲۰ حرف باشد.'
-          )
+          sendError(ws, 'نام بازیکن باید بین ۱ تا ۲۰ حرف باشد.')
           return
         }
 
@@ -629,19 +541,13 @@ wss.on('connection', (ws) => {
         const code = String(message.code || '').trim()
 
         if (!name || name.length > 20) {
-          sendError(
-            ws,
-            'نام بازیکن باید بین ۱ تا ۲۰ حرف باشد.'
-          )
+          sendError(ws, 'نام بازیکن باید بین ۱ تا ۲۰ حرف باشد.')
           return
         }
 
         await joinRoom(ws, code, name)
       } else if (message.type === 'kick_player') {
-        await kickPlayer(
-          ws,
-          String(message.playerId || '')
-        )
+        await kickPlayer(ws, String(message.playerId || ''))
       } else if (message.type === 'save_settings') {
         await saveSettings(ws, message.settings)
       } else if (message.type === 'start_game') {
@@ -651,18 +557,17 @@ wss.on('connection', (ws) => {
       } else if (message.type === 'stop_round') {
         await stopRound(ws, message.answers)
       } else if (message.type === 'score_category') {
-        const score = Number(message.score)
-
         await scoreCategory(
           ws,
           String(message.playerId || ''),
-          score
+          Number(message.score)
         )
       } else if (message.type === 'next_category') {
         await nextCategory(ws)
+      } else if (message.type === 'next_round') {
+        await nextRound(ws)
       } else if (message.type === 'leave_room') {
         await leaveRoom(ws)
-
         ws.roomCode = null
         ws.playerId = null
       }
@@ -672,7 +577,6 @@ wss.on('connection', (ws) => {
     }
   })
 
-  // Sync room changes made by other server instances.
   ws.syncInterval = setInterval(async () => {
     try {
       if (!ws.roomCode || !ws.playerId) return
@@ -684,22 +588,29 @@ wss.on('connection', (ws) => {
           type: 'room_closed',
           message: 'اتاق دیگر وجود ندارد.',
         })
-
         ws.close()
         return
       }
 
-      const playerStillExists = isPlayer(room, ws.playerId)
-
-      if (!playerStillExists) {
+      if (!isPlayer(room, ws.playerId)) {
         send(ws, {
           type: 'kicked',
           message: 'شما از اتاق خارج شده‌اید.',
         })
-
         ws.roomCode = null
         ws.playerId = null
         return
+      }
+
+      // The server, not an individual browser, ends the countdown.
+      if (
+        room.status === 'countdown' &&
+        Date.now() >= room.countdownEndsAt
+      ) {
+        room.status = 'answering'
+        delete room.countdownStartAt
+        delete room.countdownEndsAt
+        await saveRoom(room)
       }
 
       if (room.updatedAt !== ws.lastSentVersion) {
@@ -708,9 +619,8 @@ wss.on('connection', (ws) => {
     } catch (error) {
       console.error('Room sync error:', error)
     }
-  }, 1000)
+  }, 500)
 
-  // Do not automatically remove players when a connection closes.
   ws.on('close', () => {
     clearInterval(ws.syncInterval)
   })
