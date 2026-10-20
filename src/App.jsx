@@ -2,6 +2,27 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
+const CATEGORIES = [
+  'اسم',
+  'فامیل',
+  'شهر',
+  'کشور',
+  'غذا',
+  'رنگ',
+  'حیوان',
+  'ماشین',
+  'فیلم یا سریال',
+  'اشیاء',
+]
+
+const SCORE_OPTIONS = [0, 5, 10, 15, 20]
+
+function emptyAnswers() {
+  return Object.fromEntries(
+    CATEGORIES.map((category) => [category, ''])
+  )
+}
+
 function App() {
   const [playerName, setPlayerName] = useState(
     () => localStorage.getItem('esmFamilPlayerName') || ''
@@ -12,6 +33,8 @@ function App() {
   const [roomCodeInput, setRoomCodeInput] = useState('')
   const [players, setPlayers] = useState([])
   const [playerId, setPlayerId] = useState('')
+  const [roomData, setRoomData] = useState(null)
+  const [answers, setAnswers] = useState(emptyAnswers)
   const [error, setError] = useState('')
   const [connectionStatus, setConnectionStatus] = useState('')
 
@@ -32,11 +55,8 @@ function App() {
       return
     }
 
-    const protocol =
-      window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-
     const socket = new WebSocket(
-      `${protocol}//${window.location.host}/api/ws`
+      'wss://esm-famil-nu.vercel.app/api/ws'
     )
 
     wsRef.current = socket
@@ -57,26 +77,36 @@ function App() {
       try {
         const message = JSON.parse(event.data)
 
-        if (message.type === 'connected') {
-          return
-        }
+        if (message.type === 'connected') return
 
-        if (message.type === 'room_created' ||
-            message.type === 'joined_room') {
+        if (
+          message.type === 'room_created' ||
+          message.type === 'joined_room'
+        ) {
           setRoomCode(message.room.code)
           setPlayers(message.room.players)
           setPlayerId(message.playerId)
+          setRoomData(message.room)
           setPage('room')
           setError('')
           return
         }
 
         if (message.type === 'room_state') {
-          setRoomCode(message.room.code)
-          setPlayers(message.room.players)
+          const room = message.room
 
-          if (message.room.status === 'playing') {
+          setRoomCode(room.code)
+          setPlayers(room.players)
+          setRoomData(room)
+
+          if (room.status === 'waiting') {
+            setPage('room')
+          } else if (room.status === 'answering') {
             setPage('game')
+          } else if (room.status === 'scoring') {
+            setPage('scoring')
+          } else if (room.status === 'finished') {
+            setPage('results')
           }
 
           return
@@ -93,6 +123,7 @@ function App() {
           setRoomCode('')
           setPlayers([])
           setPlayerId('')
+          setRoomData(null)
           return
         }
 
@@ -102,6 +133,7 @@ function App() {
           setRoomCode('')
           setPlayers([])
           setPlayerId('')
+          setRoomData(null)
         }
       } catch {
         setError('پاسخ سرور قابل خواندن نیست.')
@@ -109,7 +141,9 @@ function App() {
     }
 
     socket.onerror = () => {
-      setError('اتصال به سرور برقرار نشد. اتصال و تنظیمات سرور را بررسی کن.')
+      setError(
+        'اتصال به سرور برقرار نشد. اتصال و تنظیمات سرور را بررسی کن.'
+      )
     }
 
     socket.onclose = () => {
@@ -125,6 +159,15 @@ function App() {
       wsRef.current?.close()
     }
   }, [])
+
+  // Initialize answers when this player's game letter becomes available.
+  useEffect(() => {
+    if (roomData?.round && playerId) {
+      setAnswers(
+        roomData.round.answers?.[playerId] || emptyAnswers()
+      )
+    }
+  }, [roomData?.round?.letter, playerId])
 
   function handleNameChange(e) {
     const name = e.target.value
@@ -176,6 +219,8 @@ function App() {
   }
 
   function startGame() {
+    setError('')
+
     connectAndSend({
       type: 'start_game',
     })
@@ -184,24 +229,83 @@ function App() {
   function copyRoomCode() {
     navigator.clipboard.writeText(roomCode)
       .then(() => setError('کد اتاق کپی شد.'))
-      .catch(() => setError('کپی خودکار انجام نشد؛ کد را دستی کپی کن.'))
+      .catch(() =>
+        setError('کپی خودکار انجام نشد؛ کد را دستی کپی کن.')
+      )
   }
 
   function backToHome() {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'leave_room' }))
+      wsRef.current.send(
+        JSON.stringify({ type: 'leave_room' })
+      )
     }
 
     setPage('home')
     setRoomCode('')
     setPlayers([])
     setPlayerId('')
+    setRoomData(null)
+    setAnswers(emptyAnswers())
     setError('')
+  }
+
+  function handleAnswerChange(category, value) {
+    const updatedAnswers = {
+      ...answers,
+      [category]: value,
+    }
+
+    setAnswers(updatedAnswers)
+
+    connectAndSend({
+      type: 'save_answers',
+      answers: updatedAnswers,
+    })
+  }
+
+  function stopGame() {
+    if (!roomData?.round || roomData.round.locked) return
+
+    setError('')
+
+    connectAndSend({
+      type: 'stop_round',
+      answers,
+    })
+  }
+
+  function giveScore(targetPlayerId, score) {
+    connectAndSend({
+      type: 'score_category',
+      playerId: targetPlayerId,
+      score,
+    })
+  }
+
+  function nextCategory() {
+    setError('')
+
+    connectAndSend({
+      type: 'next_category',
+    })
   }
 
   const isHost = players.some(
     (player) => player.id === playerId && player.isHost
   )
+
+  const round = roomData?.round
+  const currentCategory = round?.categories?.[round.categoryIndex]
+  const currentScores = round?.scores?.[round.categoryIndex] || {}
+
+  const allPlayersScored = players.length > 0 &&
+    players.every((player) =>
+      Object.prototype.hasOwnProperty.call(
+        currentScores,
+        player.id
+      )
+    )
 
   return (
     <div className="app">
@@ -280,7 +384,9 @@ function App() {
           <button
             className="menu-button join-button"
             onClick={joinRoom}
-            disabled={!playerName.trim() || roomCodeInput.length !== 4}
+            disabled={
+              !playerName.trim() || roomCodeInput.length !== 4
+            }
           >
             <span className="button-icon">↗</span>
             <span>
@@ -301,9 +407,7 @@ function App() {
 
           <div className="room-code-box">
             <span>ROOM CODE</span>
-
             <strong className="room-code">{roomCode}</strong>
-
             <button className="copy-button" onClick={copyRoomCode}>
               Copy Code
             </button>
@@ -328,7 +432,9 @@ function App() {
 
                       <div className="player-info">
                         <strong>{player.name}</strong>
-                        <small>{player.isHost ? 'Host' : 'Player'}</small>
+                        <small>
+                          {player.isHost ? 'Host' : 'Player'}
+                        </small>
                       </div>
 
                       {player.isHost ? (
@@ -374,23 +480,222 @@ function App() {
         </main>
       )}
 
-      {page === 'game' && (
-        <main className="menu-card game-page">
-          <div className="game-icon">🎉</div>
+      {page === 'game' && round && (
+        <main className="room-card game-page" dir="rtl">
+          <div className="room-top">
+            <h2>وقت اسم فامیل!</h2>
+            <p>جواب‌ها رو وارد کن؛ اولین استوپ همه جواب‌ها رو قفل می‌کنه.</p>
+          </div>
 
-          <h2>Game Started!</h2>
+          <div className="room-code-box letter-box">
+            <span>حرف این دور</span>
+            <strong className="game-letter">{round.letter}</strong>
+            <span>کد اتاق: {roomCode}</span>
+          </div>
 
-          <p className="description">
-            Welcome to Esm Famil, {playerName}!
-          </p>
+          <div className="answer-list">
+            {CATEGORIES.map((category) => (
+              <div className="answer-row" key={category}>
+                <label htmlFor={`answer-${category}`}>
+                  {category}
+                </label>
 
-          <p className="room-note">Room code: {roomCode}</p>
+                <input
+                  id={`answer-${category}`}
+                  type="text"
+                  value={answers[category] || ''}
+                  onChange={(e) =>
+                    handleAnswerChange(category, e.target.value)
+                  }
+                  placeholder={`یک ${category} با حرف ${round.letter}`}
+                  maxLength={100}
+                  disabled={round.locked}
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="players-heading">
+            <h3>بازیکن‌ها</h3>
+            <span>{players.length} نفر</span>
+          </div>
+
+          <div className="players-grid">
+            {players.map((player) => (
+              <div className="player-slot" key={player.id}>
+                <div className="player-avatar">
+                  {player.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="player-info">
+                  <strong>{player.name}</strong>
+                  <small>
+                    {round.stoppedBy === player.id
+                      ? 'استوپ زده'
+                      : round.locked
+                        ? 'پاسخ‌ها قفل شدند'
+                        : 'در حال پاسخ‌گویی'}
+                  </small>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {error && (
+            <p className="error-message" role="alert">{error}</p>
+          )}
 
           <button
-            className="menu-button join-button"
-            onClick={() => setPage('room')}
+            className="start-button stop-button"
+            onClick={stopGame}
+            disabled={round.locked}
           >
-            Back to Room
+            {round.locked ? 'پاسخ‌ها قفل شدند' : '🛑 استوپ!'}
+          </button>
+
+          <p className="room-note">
+            {round.locked
+              ? 'همه پاسخ‌ها قفل شده‌اند؛ در حال ورود به امتیازدهی.'
+              : 'با زدن استوپ، پاسخ همه بازیکن‌ها قفل می‌شود.'}
+          </p>
+        </main>
+      )}
+
+      {page === 'scoring' && round && (
+        <main className="room-card scoring-page" dir="rtl">
+          <div className="room-top">
+            <h2>امتیازدهی</h2>
+            <p>
+              {isHost
+                ? 'برای هر پاسخ، امتیاز مناسب رو انتخاب کن.'
+                : 'میزبان در حال امتیاز دادن به پاسخ‌هاست.'}
+            </p>
+          </div>
+
+          <div className="room-code-box letter-box">
+            <span>حرف این دور</span>
+            <strong className="game-letter">{round.letter}</strong>
+            <span>
+              دسته {round.categoryIndex + 1} از {CATEGORIES.length}
+            </span>
+          </div>
+
+          <h3 className="scoring-category">
+            دسته فعلی: {currentCategory}
+          </h3>
+
+          <div className="score-player-list">
+            {players.map((player) => {
+              const answer =
+                round.answers?.[player.id]?.[currentCategory] || ''
+
+              const hasScore = Object.prototype.hasOwnProperty.call(
+                currentScores,
+                player.id
+              )
+
+              const selectedScore = currentScores[player.id]
+
+              return (
+                <section className="score-player-card" key={player.id}>
+                  <div className="score-player-heading">
+                    <strong>{player.name}</strong>
+                    {player.id === round.stoppedBy && (
+                      <span className="host-badge">STOP</span>
+                    )}
+                  </div>
+
+                  <div className="score-answer">
+                    {answer || 'بدون پاسخ'}
+                  </div>
+
+                  <div className="score-buttons">
+                    {SCORE_OPTIONS.map((score) => (
+                      <button
+                        key={score}
+                        type="button"
+                        className={`score-button ${hasScore && selectedScore === score
+                            ? 'selected'
+                            : ''
+                          }`}
+                        onClick={() =>
+                          isHost && giveScore(player.id, score)
+                        }
+                        disabled={!isHost}
+                      >
+                        {score}
+                      </button>
+                    ))}
+                  </div>
+
+                  {hasScore && (
+                    <p className="room-note">
+                      امتیاز انتخاب‌شده: {selectedScore}
+                    </p>
+                  )}
+                </section>
+              )
+            })}
+          </div>
+
+          {error && (
+            <p className="error-message" role="alert">{error}</p>
+          )}
+
+          {isHost && (
+            <button
+              className="start-button"
+              onClick={nextCategory}
+              disabled={!allPlayersScored}
+            >
+              {round.categoryIndex === CATEGORIES.length - 1
+                ? 'مشاهده نتیجه نهایی'
+                : 'دسته بعدی'}
+              <span> ←</span>
+            </button>
+          )}
+
+          {!isHost && (
+            <p className="room-note">
+              بعد از امتیازدهی همه بازیکن‌ها، میزبان به دسته بعدی می‌رود.
+            </p>
+          )}
+        </main>
+      )}
+
+      {page === 'results' && roomData && (
+        <main className="room-card results-page" dir="rtl">
+          <div className="game-icon">🏆</div>
+          <h2>نتیجه نهایی</h2>
+          <p className="description">
+            امتیازهای این دور
+          </p>
+
+          <div className="final-score-list">
+            {[...players]
+              .sort(
+                (a, b) =>
+                  (roomData.totalScores?.[b.id] || 0) -
+                  (roomData.totalScores?.[a.id] || 0)
+              )
+              .map((player, index) => (
+                <div className="final-score-row" key={player.id}>
+                  <span className="final-rank">
+                    {index === 0 ? '🏆' : index + 1}
+                  </span>
+                  <strong>{player.name}</strong>
+                  <span className="final-points">
+                    {roomData.totalScores?.[player.id] || 0} امتیاز
+                  </span>
+                </div>
+              ))}
+          </div>
+
+          <p className="room-note">
+            کد اتاق: {roomCode}
+          </p>
+
+          <button className="back-button" onClick={backToHome}>
+            بازگشت به صفحه اصلی
           </button>
         </main>
       )}

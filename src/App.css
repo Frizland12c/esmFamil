@@ -433,3 +433,250 @@ footer {
     letter-spacing: 7px;
   }
 }
+
+/* Game answer form */
+.letter-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.game-letter {
+  font-size: 3.5rem;
+  line-height: 1.3;
+  color: #a78bfa;
+}
+
+.answer-list,
+.score-player-list,
+.final-score-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 24px 0;
+}
+
+.answer-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: right;
+}
+
+.answer-row label {
+  font-weight: 700;
+}
+
+.answer-row input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid #49415f;
+  border-radius: 10px;
+  background: #211d30;
+  color: #fff;
+  font: inherit;
+  text-align: right;
+}
+
+.answer-row input:focus {
+  outline: 2px solid #8b5cf6;
+  outline-offset: 1px;
+}
+
+.answer-row input:disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
+}
+
+.stop-button {
+  background: #dc3545;
+}
+
+.stop-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.scoring-category {
+  margin-top: 24px;
+  text-align: center;
+}
+
+.score-player-card {
+  padding: 16px;
+  border: 1px solid #49415f;
+  border-radius: 14px;
+  background: #211d30;
+}
+
+.score-player-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.score-answer {
+  margin: 14px 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #302943;
+  overflow-wrap: anywhere;
+  min-height: 24px;
+}
+
+.score-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.score-button {
+  flex: 1;
+  min-width: 45px;
+  padding: 10px 8px;
+  border: 1px solid #65577f;
+  border-radius: 8px;
+  background: #39304d;
+  color: white;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.score-button.selected {
+  background: #16834a;
+  border-color: #29c56f;
+  color: white;
+}
+
+.score-button:disabled {
+  opacity: 0.8;
+  cursor: default;
+}
+
+.final-score-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #49415f;
+  border-radius: 12px;
+  background: #211d30;
+}
+
+.final-rank {
+  min-width: 32px;
+  font-weight: 700;
+}
+
+.final-points {
+  margin-right: auto;
+  color: #a78bfa;
+  font-weight: 700;
+}
+
+@media (max-width: 480px) {
+  .score-player-card {
+    padding: 12px;
+  }
+
+  .score-buttons {
+    gap: 5px;
+  }
+
+  .score-button {
+    min-width: 38px;
+    padding: 9px 5px;
+  }
+}
+
+/* ===== صفحه اول: مرتب‌سازی ورودی‌ها ===== */
+
+.menu-card {
+  max-width: 460px;
+  padding: 28px 30px;
+}
+
+.menu-card h2 {
+  margin-bottom: 8px;
+}
+
+.description {
+  margin: 8px 0 24px;
+  line-height: 1.8;
+}
+
+/* بخش فرم‌های صفحه اول */
+.menu-card input {
+  display: block;
+  width: 100%;
+  max-width: 340px;
+  height: 46px;
+  margin: 0 auto 14px;
+  padding: 0 15px;
+  border: 1px solid #49415f;
+  border-radius: 12px;
+  outline: none;
+  background: #0f1529;
+  color: #f8fafc;
+  font: inherit;
+  font-size: 14px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.menu-card input:focus {
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 3px #8b5cf622;
+}
+
+.menu-card input::placeholder {
+  color: #8490a8;
+}
+
+/* ورودی کد اتاق؛ چهار رقم */
+.menu-card input[name="roomCode"],
+.menu-card input[name="code"] {
+  max-width: 180px;
+  text-align: center;
+  direction: ltr;
+  letter-spacing: 8px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+/* فاصله و نظم دکمه‌ها */
+.menu-card .menu-button {
+  margin-top: 12px;
+  min-height: 68px;
+}
+
+.menu-card .notice {
+  line-height: 1.8;
+}
+
+/* صفحه اول در موبایل */
+@media (max-width: 480px) {
+  .menu-card {
+    padding: 24px 18px;
+    border-radius: 22px;
+  }
+
+  .menu-card input {
+    max-width: 100%;
+    height: 44px;
+  }
+
+  .menu-card input[name="roomCode"],
+  .menu-card input[name="code"] {
+    max-width: 160px;
+  }
+
+  .header {
+    margin-bottom: 22px;
+  }
+}
