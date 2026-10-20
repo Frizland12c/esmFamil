@@ -1,4 +1,5 @@
-import { useState } from 'react'
+
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
 function App() {
@@ -8,8 +9,122 @@ function App() {
 
   const [page, setPage] = useState('home')
   const [roomCode, setRoomCode] = useState('')
+  const [roomCodeInput, setRoomCodeInput] = useState('')
   const [players, setPlayers] = useState([])
+  const [playerId, setPlayerId] = useState('')
   const [error, setError] = useState('')
+  const [connectionStatus, setConnectionStatus] = useState('')
+
+  const wsRef = useRef(null)
+  const pendingMessagesRef = useRef([])
+
+  function connectAndSend(message) {
+    const existingSocket = wsRef.current
+
+    if (existingSocket?.readyState === WebSocket.OPEN) {
+      existingSocket.send(JSON.stringify(message))
+      return
+    }
+
+    pendingMessagesRef.current.push(message)
+
+    if (existingSocket?.readyState === WebSocket.CONNECTING) {
+      return
+    }
+
+    const protocol =
+      window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+
+    const socket = new WebSocket(
+      `${protocol}//${window.location.host}/api/ws`
+    )
+
+    wsRef.current = socket
+    setConnectionStatus('در حال اتصال به سرور...')
+
+    socket.onopen = () => {
+      setConnectionStatus('متصل به سرور')
+
+      const messages = pendingMessagesRef.current
+      pendingMessagesRef.current = []
+
+      messages.forEach((item) => {
+        socket.send(JSON.stringify(item))
+      })
+    }
+
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data)
+
+        if (message.type === 'connected') {
+          return
+        }
+
+        if (message.type === 'room_created' ||
+            message.type === 'joined_room') {
+          setRoomCode(message.room.code)
+          setPlayers(message.room.players)
+          setPlayerId(message.playerId)
+          setPage('room')
+          setError('')
+          return
+        }
+
+        if (message.type === 'room_state') {
+          setRoomCode(message.room.code)
+          setPlayers(message.room.players)
+
+          if (message.room.status === 'playing') {
+            setPage('game')
+          }
+
+          return
+        }
+
+        if (message.type === 'error') {
+          setError(message.message)
+          return
+        }
+
+        if (message.type === 'kicked') {
+          setError(message.message)
+          setPage('home')
+          setRoomCode('')
+          setPlayers([])
+          setPlayerId('')
+          return
+        }
+
+        if (message.type === 'room_closed') {
+          setError(message.message)
+          setPage('home')
+          setRoomCode('')
+          setPlayers([])
+          setPlayerId('')
+        }
+      } catch {
+        setError('پاسخ سرور قابل خواندن نیست.')
+      }
+    }
+
+    socket.onerror = () => {
+      setError('اتصال به سرور برقرار نشد. اتصال و تنظیمات سرور را بررسی کن.')
+    }
+
+    socket.onclose = () => {
+      if (wsRef.current === socket) {
+        wsRef.current = null
+        setConnectionStatus('اتصال قطع شد')
+      }
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      wsRef.current?.close()
+    }
+  }, [])
 
   function handleNameChange(e) {
     const name = e.target.value
@@ -25,22 +140,12 @@ function App() {
       return
     }
 
-    const newCode = String(
-      Math.floor(10000 + Math.random() * 90000)
-    )
-
-    setRoomCode(newCode)
-
-    setPlayers([
-      {
-        id: 1,
-        name: playerName.trim(),
-        isHost: true,
-      },
-    ])
-
     setError('')
-    setPage('room')
+
+    connectAndSend({
+      type: 'create_room',
+      name: playerName.trim(),
+    })
   }
 
   function joinRoom() {
@@ -49,23 +154,54 @@ function App() {
       return
     }
 
-    setError('اتصال بازیکنان دیگر را در مرحله بعد پیاده‌سازی می‌کنیم.')
+    if (!/^\d{4}$/.test(roomCodeInput)) {
+      setError('کد اتاق باید دقیقاً ۴ رقم باشد.')
+      return
+    }
+
+    setError('')
+
+    connectAndSend({
+      type: 'join_room',
+      name: playerName.trim(),
+      code: roomCodeInput,
+    })
   }
 
-  function kickPlayer(playerId) {
-    setPlayers((currentPlayers) =>
-      currentPlayers.filter((player) => player.id !== playerId)
-    )
+  function kickPlayer(id) {
+    connectAndSend({
+      type: 'kick_player',
+      playerId: id,
+    })
   }
 
   function startGame() {
-    setPage('game')
+    connectAndSend({
+      type: 'start_game',
+    })
   }
 
   function copyRoomCode() {
     navigator.clipboard.writeText(roomCode)
+      .then(() => setError('کد اتاق کپی شد.'))
+      .catch(() => setError('کپی خودکار انجام نشد؛ کد را دستی کپی کن.'))
+  }
+
+  function backToHome() {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'leave_room' }))
+    }
+
+    setPage('home')
+    setRoomCode('')
+    setPlayers([])
+    setPlayerId('')
     setError('')
   }
+
+  const isHost = players.some(
+    (player) => player.id === playerId && player.isHost
+  )
 
   return (
     <div className="app">
@@ -91,10 +227,32 @@ function App() {
               autoComplete="nickname"
             />
 
+            <label htmlFor="roomCodeInput">
+              کد اتاق دوستانت (۴ رقم)
+            </label>
+
+            <input
+              id="roomCodeInput"
+              type="text"
+              inputMode="numeric"
+              placeholder="مثلاً 4821"
+              value={roomCodeInput}
+              onChange={(e) =>
+                setRoomCodeInput(
+                  e.target.value.replace(/\D/g, '').slice(0, 4)
+                )
+              }
+              maxLength={4}
+            />
+
             {error && (
               <p className="error-message" role="alert">
                 {error}
               </p>
+            )}
+
+            {connectionStatus && (
+              <p className="room-note">{connectionStatus}</p>
             )}
           </div>
 
@@ -109,6 +267,7 @@ function App() {
           <button
             className="menu-button create-button"
             onClick={createRoom}
+            disabled={!playerName.trim()}
           >
             <span className="button-icon">＋</span>
             <span>
@@ -121,6 +280,7 @@ function App() {
           <button
             className="menu-button join-button"
             onClick={joinRoom}
+            disabled={!playerName.trim() || roomCodeInput.length !== 4}
           >
             <span className="button-icon">↗</span>
             <span>
@@ -142,14 +302,9 @@ function App() {
           <div className="room-code-box">
             <span>ROOM CODE</span>
 
-            <strong className="room-code">
-              {roomCode}
-            </strong>
+            <strong className="room-code">{roomCode}</strong>
 
-            <button
-              className="copy-button"
-              onClick={copyRoomCode}
-            >
+            <button className="copy-button" onClick={copyRoomCode}>
               Copy Code
             </button>
           </div>
@@ -173,17 +328,12 @@ function App() {
 
                       <div className="player-info">
                         <strong>{player.name}</strong>
-
-                        <small>
-                          {player.isHost ? 'Host' : 'Player'}
-                        </small>
+                        <small>{player.isHost ? 'Host' : 'Player'}</small>
                       </div>
 
                       {player.isHost ? (
-                        <span className="host-badge">
-                          HOST
-                        </span>
-                      ) : (
+                        <span className="host-badge">HOST</span>
+                      ) : isHost ? (
                         <button
                           className="kick-button"
                           title="Remove player"
@@ -191,7 +341,7 @@ function App() {
                         >
                           ✕
                         </button>
-                      )}
+                      ) : null}
                     </>
                   ) : (
                     <div className="empty-slot">
@@ -208,17 +358,17 @@ function App() {
             Share the room code with your friends.
           </p>
 
-          <button
-            className="start-button"
-            onClick={startGame}
-          >
-            Start Game <span>→</span>
-          </button>
+          {error && (
+            <p className="error-message" role="alert">{error}</p>
+          )}
 
-          <button
-            className="back-button"
-            onClick={() => setPage('home')}
-          >
+          {isHost && (
+            <button className="start-button" onClick={startGame}>
+              Start Game <span>→</span>
+            </button>
+          )}
+
+          <button className="back-button" onClick={backToHome}>
             ← Back to Home
           </button>
         </main>
@@ -234,9 +384,7 @@ function App() {
             Welcome to Esm Famil, {playerName}!
           </p>
 
-          <p className="room-note">
-            Room code: {roomCode}
-          </p>
+          <p className="room-note">Room code: {roomCode}</p>
 
           <button
             className="menu-button join-button"
@@ -247,9 +395,7 @@ function App() {
         </main>
       )}
 
-      <footer>
-        Made for friends, made for fun.
-      </footer>
+      <footer>Made for friends, made for fun.</footer>
     </div>
   )
 }
