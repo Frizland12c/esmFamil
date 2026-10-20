@@ -15,12 +15,32 @@ const CATEGORIES = [
   'اشیاء',
 ]
 
+const LETTERS = [
+  'ا', 'ب', 'پ', 'ت', 'ج', 'چ', 'ح', 'خ',
+  'د', 'ر', 'ز', 'س', 'ش', 'ع', 'غ', 'ف',
+  'ق', 'ک', 'گ', 'ل', 'م', 'ن', 'و', 'ه', 'ی',
+]
+
 const SCORE_OPTIONS = [0, 5, 10, 15, 20]
 
-function emptyAnswers() {
+const DEFAULT_SETTINGS = {
+  totalRounds: 3,
+  categories: [...CATEGORIES],
+  letters: [...LETTERS],
+}
+
+function emptyAnswers(categories = CATEGORIES) {
   return Object.fromEntries(
-    CATEGORIES.map((category) => [category, ''])
+    categories.map((category) => [category, ''])
   )
+}
+
+function normalizeSettings(settings) {
+  return {
+    totalRounds: settings?.totalRounds ?? DEFAULT_SETTINGS.totalRounds,
+    categories: [...(settings?.categories ?? DEFAULT_SETTINGS.categories)],
+    letters: [...(settings?.letters ?? DEFAULT_SETTINGS.letters)],
+  }
 }
 
 function App() {
@@ -37,6 +57,10 @@ function App() {
   const [answers, setAnswers] = useState(emptyAnswers)
   const [error, setError] = useState('')
   const [connectionStatus, setConnectionStatus] = useState('')
+
+  const [settingsDraft, setSettingsDraft] = useState(
+    () => normalizeSettings(DEFAULT_SETTINGS)
+  )
 
   const wsRef = useRef(null)
   const pendingMessagesRef = useRef([])
@@ -83,10 +107,16 @@ function App() {
           message.type === 'room_created' ||
           message.type === 'joined_room'
         ) {
-          setRoomCode(message.room.code)
-          setPlayers(message.room.players)
+          const room = message.room
+
+          setRoomCode(room.code)
+          setPlayers(room.players)
           setPlayerId(message.playerId)
-          setRoomData(message.room)
+          setRoomData(room)
+          setSettingsDraft(normalizeSettings(room.settings))
+          setAnswers(
+            emptyAnswers(room.settings?.categories || CATEGORIES)
+          )
           setPage('room')
           setError('')
           return
@@ -160,14 +190,20 @@ function App() {
     }
   }, [])
 
-  // Initialize answers when this player's game letter becomes available.
   useEffect(() => {
-    if (roomData?.round && playerId) {
+    const round = roomData?.round
+
+    if (round && playerId) {
       setAnswers(
-        roomData.round.answers?.[playerId] || emptyAnswers()
+        round.answers?.[playerId] ||
+        emptyAnswers(round.categories || CATEGORIES)
       )
     }
-  }, [roomData?.round?.letter, playerId])
+  }, [
+    roomData?.round?.letter,
+    roomData?.round?.roundNumber,
+    playerId,
+  ])
 
   function handleNameChange(e) {
     const name = e.target.value
@@ -218,7 +254,93 @@ function App() {
     })
   }
 
+  function toggleCategory(category) {
+    setSettingsDraft((previous) => {
+      const selected = previous.categories.includes(category)
+
+      const categories = selected
+        ? previous.categories.filter((item) => item !== category)
+        : CATEGORIES.filter(
+            (item) =>
+              previous.categories.includes(item) || item === category
+          )
+
+      return {
+        ...previous,
+        categories,
+      }
+    })
+
+    setError('')
+  }
+
+  function toggleLetter(letter) {
+    setSettingsDraft((previous) => {
+      const selected = previous.letters.includes(letter)
+
+      const letters = selected
+        ? previous.letters.filter((item) => item !== letter)
+        : LETTERS.filter(
+            (item) =>
+              previous.letters.includes(item) || item === letter
+          )
+
+      return {
+        ...previous,
+        letters,
+      }
+    })
+
+    setError('')
+  }
+
+  function changeTotalRounds(value) {
+    setSettingsDraft((previous) => ({
+      ...previous,
+      totalRounds: Number(value),
+    }))
+
+    setError('')
+  }
+
+  const savedSettings = normalizeSettings(roomData?.settings)
+  const isHost = players.some(
+    (player) => player.id === playerId && player.isHost
+  )
+
+  const settingsAreSaved =
+    JSON.stringify(settingsDraft) === JSON.stringify(savedSettings)
+
+  function saveSettings() {
+    if (!isHost) {
+      setError('فقط میزبان می‌تواند تنظیمات را تغییر دهد.')
+      return
+    }
+
+    if (settingsDraft.categories.length === 0) {
+      setError('حداقل یک دسته را انتخاب کن.')
+      return
+    }
+
+    if (settingsDraft.letters.length === 0) {
+      setError('حداقل یک حرف را انتخاب کن.')
+      return
+    }
+
+    setError('')
+
+    connectAndSend({
+      type: 'save_settings',
+      settings: settingsDraft,
+    })
+  }
+
   function startGame() {
+    if (!settingsAreSaved) {
+      setError('ابتدا تنظیمات را ذخیره کن.')
+      return
+    }
+
     setError('')
 
     connectAndSend({
@@ -291,21 +413,23 @@ function App() {
     })
   }
 
-  const isHost = players.some(
-    (player) => player.id === playerId && player.isHost
-  )
-
   const round = roomData?.round
-  const currentCategory = round?.categories?.[round.categoryIndex]
-  const currentScores = round?.scores?.[round.categoryIndex] || {}
+  const currentCategory =
+    round?.categories?.[round.categoryIndex]
 
-  const allPlayersScored = players.length > 0 &&
+  const currentScores =
+    round?.scores?.[round.categoryIndex] || {}
+
+  const allPlayersScored =
+    players.length > 0 &&
     players.every((player) =>
       Object.prototype.hasOwnProperty.call(
         currentScores,
         player.id
       )
     )
+
+  const roomSettings = normalizeSettings(roomData?.settings)
 
   return (
     <div className="app">
@@ -413,6 +537,116 @@ function App() {
             </button>
           </div>
 
+          <section className="game-settings" dir="rtl">
+            <h3>⚙️ تنظیمات بازی</h3>
+
+            <div className="settings-section">
+              <label htmlFor="totalRounds">
+                تعداد دورهای بازی
+              </label>
+
+              {isHost ? (
+                <select
+                  id="totalRounds"
+                  value={settingsDraft.totalRounds}
+                  onChange={(e) => changeTotalRounds(e.target.value)}
+                >
+                  {Array.from({ length: 10 }, (_, index) => index + 1).map(
+                    (number) => (
+                      <option key={number} value={number}>
+                        {number} دور
+                      </option>
+                    )
+                  )}
+                </select>
+              ) : (
+                <p>{roomSettings.totalRounds} دور</p>
+              )}
+            </div>
+
+            <div className="settings-section">
+              <h4>دسته‌های بازی</h4>
+              <p className="room-note">
+                {isHost
+                  ? 'دسته‌هایی را که می‌خواهی در بازی باشند انتخاب کن.'
+                  : 'دسته‌های انتخاب‌شده برای این بازی:'}
+              </p>
+
+              <div className="settings-grid">
+                {CATEGORIES.map((category) => {
+                  const checked = isHost
+                    ? settingsDraft.categories.includes(category)
+                    : roomSettings.categories.includes(category)
+
+                  return (
+                    <label className="setting-option" key={category}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={!isHost}
+                        onChange={() => toggleCategory(category)}
+                      />
+                      <span>{category}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="settings-section">
+              <h4>حروف مجاز</h4>
+              <p className="room-note">
+                {isHost
+                  ? 'حرف‌های مجاز را انتخاب کن. در هر دور یکی از این حروف انتخاب می‌شود.'
+                  : 'حروفی که میزبان برای بازی انتخاب کرده است:'}
+              </p>
+
+              <div className="settings-grid letters-grid">
+                {LETTERS.map((letter) => {
+                  const checked = isHost
+                    ? settingsDraft.letters.includes(letter)
+                    : roomSettings.letters.includes(letter)
+
+                  return (
+                    <label className="setting-option letter-option" key={letter}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={!isHost}
+                        onChange={() => toggleLetter(letter)}
+                      />
+                      <span>{letter}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+
+            {isHost && (
+              <div className="settings-actions">
+                <p className="room-note">
+                  {settingsAreSaved
+                    ? 'تنظیمات ذخیره شده‌اند.'
+                    : 'تغییرات ذخیره نشده‌اند.'}
+                </p>
+
+                <button
+                  className="start-button"
+                  onClick={saveSettings}
+                  disabled={settingsAreSaved}
+                >
+                  ذخیره تنظیمات
+                </button>
+              </div>
+            )}
+
+            {!isHost && (
+              <p className="room-note">
+                تنظیمات این اتاق توسط میزبان کنترل می‌شود.
+              </p>
+            )}
+          </section>
+
           <div className="players-heading">
             <h3>Players</h3>
             <span>{players.length} / 15</span>
@@ -469,7 +703,11 @@ function App() {
           )}
 
           {isHost && (
-            <button className="start-button" onClick={startGame}>
+            <button
+              className="start-button"
+              onClick={startGame}
+              disabled={!settingsAreSaved}
+            >
               Start Game <span>→</span>
             </button>
           )}
@@ -484,7 +722,11 @@ function App() {
         <main className="room-card game-page" dir="rtl">
           <div className="room-top">
             <h2>وقت اسم فامیل!</h2>
-            <p>جواب‌ها رو وارد کن؛ اولین استوپ همه جواب‌ها رو قفل می‌کنه.</p>
+            <p>
+              دور {round.roundNumber || 1} از {round.totalRounds || roomSettings.totalRounds}
+              {' — '}
+              جواب‌ها رو وارد کن؛ اولین استوپ همه جواب‌ها رو قفل می‌کنه.
+            </p>
           </div>
 
           <div className="room-code-box letter-box">
@@ -494,7 +736,7 @@ function App() {
           </div>
 
           <div className="answer-list">
-            {CATEGORIES.map((category) => (
+            {round.categories.map((category) => (
               <div className="answer-row" key={category}>
                 <label htmlFor={`answer-${category}`}>
                   {category}
@@ -575,7 +817,10 @@ function App() {
             <span>حرف این دور</span>
             <strong className="game-letter">{round.letter}</strong>
             <span>
-              دسته {round.categoryIndex + 1} از {CATEGORIES.length}
+              دور {round.roundNumber || 1} از {round.totalRounds || roomSettings.totalRounds}
+            </span>
+            <span>
+              دسته {round.categoryIndex + 1} از {round.categories.length}
             </span>
           </div>
 
@@ -613,10 +858,11 @@ function App() {
                       <button
                         key={score}
                         type="button"
-                        className={`score-button ${hasScore && selectedScore === score
+                        className={`score-button ${
+                          hasScore && selectedScore === score
                             ? 'selected'
                             : ''
-                          }`}
+                        }`}
                         onClick={() =>
                           isHost && giveScore(player.id, score)
                         }
@@ -647,8 +893,10 @@ function App() {
               onClick={nextCategory}
               disabled={!allPlayersScored}
             >
-              {round.categoryIndex === CATEGORIES.length - 1
-                ? 'مشاهده نتیجه نهایی'
+              {round.categoryIndex === round.categories.length - 1
+                ? (round.roundNumber >= round.totalRounds
+                    ? 'مشاهده نتیجه نهایی'
+                    : 'پایان دور و شروع دور بعد')
                 : 'دسته بعدی'}
               <span> ←</span>
             </button>
@@ -656,7 +904,7 @@ function App() {
 
           {!isHost && (
             <p className="room-note">
-              بعد از امتیازدهی همه بازیکن‌ها، میزبان به دسته بعدی می‌رود.
+              بعد از امتیازدهی همه بازیکن‌ها، میزبان ادامه می‌دهد.
             </p>
           )}
         </main>
@@ -667,7 +915,7 @@ function App() {
           <div className="game-icon">🏆</div>
           <h2>نتیجه نهایی</h2>
           <p className="description">
-            امتیازهای این دور
+            امتیاز کل پس از {roomData.settings?.totalRounds || 3} دور
           </p>
 
           <div className="final-score-list">

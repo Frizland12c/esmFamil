@@ -680,3 +680,110 @@ footer {
     margin-bottom: 22px;
   }
 }
+
+.game-settings {
+  margin: 24px 0;
+  padding: 20px;
+  border: 1px solid rgba(150, 120, 255, 0.25);
+  border-radius: 18px;
+  background: rgba(120, 90, 220, 0.07);
+  text-align: right;
+}
+
+.game-settings h3 {
+  margin-top: 0;
+  margin-bottom: 20px;
+}
+
+.settings-section {
+  margin: 20px 0;
+}
+
+.settings-section h4 {
+  margin-bottom: 8px;
+}
+
+.settings-section select {
+  width: 100%;
+  max-width: 220px;
+  padding: 10px 12px;
+  border: 1px solid rgba(150, 120, 255, 0.4);
+  border-radius: 10px;
+  background: #211c35;
+  color: white;
+  font: inherit;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.setting-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid rgba(150, 120, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+}
+
+.setting-option input {
+  accent-color: #9875ff;
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+
+.setting-option:has(input:checked) {
+  border-color: rgba(152, 117, 255, 0.8);
+  background: rgba(152, 117, 255, 0.12);
+}
+
+.setting-option input:disabled {
+  cursor: default;
+}
+
+.letters-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.letter-option {
+  justify-content: center;
+}
+
+.settings-actions {
+  margin-top: 22px;
+}
+
+.settings-actions .start-button {
+  width: 100%;
+}
+
+.start-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .game-settings {
+    padding: 14px;
+  }
+
+  .settings-grid {
+    gap: 7px;
+  }
+
+  .setting-option {
+    padding: 8px 6px;
+    font-size: 13px;
+  }
+
+  .letters-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
